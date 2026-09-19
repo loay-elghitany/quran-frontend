@@ -33,6 +33,8 @@ export default function SuperAdminDashboard() {
   const [userStatus, setUserStatus] = useState("");
   const [isExportingCredentials, setIsExportingCredentials] = useState(false);
   const [isExportingSummary, setIsExportingSummary] = useState(false);
+  const [isExportingTopStudents, setIsExportingTopStudents] = useState(false);
+  const [lessonWatchTracker, setLessonWatchTracker] = useState([]);
   const [activeTab, setActiveTab] = useState("teachers");
 
   const tabs = [
@@ -67,6 +69,7 @@ export default function SuperAdminDashboard() {
     errorPenaltyMultiplier: 1,
     memorizationPageBonus: 10,
     revisionPageBonus: 5,
+    videoQuestionPoints: 3,
   });
   const [settingsStatus, setSettingsStatus] = useState("");
 
@@ -124,6 +127,21 @@ export default function SuperAdminDashboard() {
     setSelectedGroupStudents([]);
   }, [selectedGroupTeacher]);
 
+  const fetchLessonWatchTracker = async () => {
+    try {
+      const response = await api.get("/admin/curriculum/lesson-progress");
+      setLessonWatchTracker(response.data.lessonProgress || []);
+    } catch (error) {
+      console.error("فشل تحميل متابعة مشاهدات الطلاب:", error);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "groups") {
+      fetchLessonWatchTracker();
+    }
+  }, [activeTab]);
+
   // Fetch gamification settings
   useEffect(() => {
     const fetchSettings = async () => {
@@ -148,6 +166,7 @@ export default function SuperAdminDashboard() {
             errorPenaltyMultiplier: s.errorPenaltyMultiplier ?? 1,
             memorizationPageBonus: s.memorizationPageBonus ?? 10,
             revisionPageBonus: s.revisionPageBonus ?? 5,
+            videoQuestionPoints: s.videoQuestionPoints ?? 3,
           });
         }
       } catch (error) {
@@ -472,6 +491,78 @@ export default function SuperAdminDashboard() {
       console.error("Failed to export summary:", error);
     } finally {
       setIsExportingSummary(false);
+    }
+  };
+
+  const buildTopStudentsPdfHtml = (reportData) => {
+    const { topStudents = [], groupsLeaderboard = [] } = reportData;
+    const topStudentsRows = topStudents
+      .map((student, index) => {
+        const teacherName = student.teacherId
+          ? `${student.teacherId.firstName || ""} ${student.teacherId.lastName || ""}`.trim()
+          : "—";
+        const rankBadge =
+          index === 0
+            ? "🥇 الأول"
+            : index === 1
+              ? "🥈 الثاني"
+              : index === 2
+                ? "🥉 الثالث"
+                : `#${index + 1}`;
+        return `<tr><td style="text-align:center; font-weight:bold;">${rankBadge}</td><td style="font-weight:600;">${escapeHtml(student.firstName || "")} ${escapeHtml(student.lastName || "")}</td><td>${escapeHtml(teacherName)}</td><td style="text-align:center; font-weight:bold; color:#0f766e;">${escapeHtml(String(student.points || 0))} 🪙</td></tr>`;
+      })
+      .join("");
+    const groupsHtml = groupsLeaderboard
+      .map((group) => {
+        const topList = (group.topStudents || [])
+          .map(
+            (student, index) =>
+              `<li><strong>${index === 0 ? "🥇" : index === 1 ? "🥈" : "🥉"} ${escapeHtml(student.firstName || "")} ${escapeHtml(student.lastName || "")}</strong> (${escapeHtml(String(student.points || 0))} نقطة)</li>`,
+          )
+          .join("");
+        return `<div class="group-card"><div class="group-title">${escapeHtml(group.groupName || "")} (المعلم: ${escapeHtml(group.teacherName || "")})</div><div class="group-points">إجمالي نقاط الحلقة: ${escapeHtml(String(group.totalGroupPoints || 0))} 🪙 | عدد الطلاب: ${escapeHtml(String(group.allStudentsCount || 0))}</div><ul class="top-list">${topList || "<li>لا يوجد طلاب مسجلين</li>"}</ul></div>`;
+      })
+      .join("");
+    return `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8" /><title>لوحة شرف الأوائل وصدارة المجموعات</title><style>@page { size: A4; margin: 10mm; } body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; color: #0f172a; margin: 0; padding: 10px; direction: rtl; } .report-header { text-align: center; border-bottom: 2px solid #0f766e; padding-bottom: 8px; margin-bottom: 15px; } .report-header h1 { color: #0f766e; margin: 0 0 4px 0; font-size: 20px; } .section-title { font-size: 15px; font-weight: bold; color: #0f766e; margin: 15px 0 8px 0; border-right: 4px solid #0f766e; padding-right: 8px; } table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 15px; } th, td { border: 1px solid #cbd5e1; padding: 6px 8px; } th { background: #f1f5f9; color: #334155; } .groups-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; } .group-card { border: 1px solid #cbd5e1; border-radius: 10px; padding: 8px 12px; background: #fafafa; break-inside: avoid; } .group-title { font-weight: bold; color: #0f766e; font-size: 13px; } .group-points { font-size: 11px; color: #64748b; margin-bottom: 6px; } .top-list { margin: 0; padding-right: 18px; font-size: 11px; }</style></head><body><div class="report-header"><h1>🏆 لوحة شرف الأوائل وصدارة الحلقات القرآنية</h1><div style="font-size:11px; color:#64748b;">تاريخ التصدير: ${new Date().toLocaleDateString("ar-EG")}</div></div><div class="section-title">🌟 قائمة الـ 20 الأوائل على مستوى الأكاديمية</div><table><thead><tr><th style="width: 15%;">الترتيب</th><th>اسم الطالب</th><th>المعلم</th><th style="width: 20%;">إجمالي النقاط</th></tr></thead><tbody>${topStudentsRows}</tbody></table><div><div class="section-title">👥 أوائل الحلقات والمجموعات القرآنية</div><div class="groups-grid">${groupsHtml}</div></div></body></html>`;
+  };
+
+  const handleExportTopStudents = async () => {
+    if (isExportingTopStudents) return;
+    setIsExportingTopStudents(true);
+    try {
+      const response = await api.get("/admin/export/top-students");
+      const data = response.data?.data;
+      if (
+        !data ||
+        (!data.topStudents?.length && !data.groupsLeaderboard?.length)
+      ) {
+        alert("لا توجد بيانات متاحة للتصدير.");
+        return;
+      }
+      const iframe = document.createElement("iframe");
+      Object.assign(iframe.style, {
+        position: "fixed",
+        right: "-9999px",
+        top: "-9999px",
+        width: "0",
+        height: "0",
+        border: "0",
+      });
+      document.body.appendChild(iframe);
+      iframe.srcdoc = buildTopStudentsPdfHtml(data);
+      iframe.onload = () => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        } catch (error) {
+          console.error("Print error:", error);
+        }
+        window.setTimeout(() => iframe.parentNode?.removeChild(iframe), 1000);
+      };
+    } catch (error) {
+      console.error("Failed to export top students:", error);
+    } finally {
+      setIsExportingTopStudents(false);
     }
   };
 
@@ -1194,6 +1285,17 @@ export default function SuperAdminDashboard() {
                       ? "جاري تحضير تقرير PDF..."
                       : "📑 تقرير المعلمين والطلاب (PDF)"}
                   </button>
+                  <button
+                    type="button"
+                    onClick={handleExportTopStudents}
+                    disabled={isExportingTopStudents}
+                    className="inline-flex items-center justify-center rounded-2xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-400"
+                    style={{ marginLeft: 8 }}
+                  >
+                    {isExportingTopStudents
+                      ? "جاري تحضير الملف..."
+                      : "🏆 لوحة شرف الأوائل (PDF)"}
+                  </button>
                 </div>
                 <form className="space-y-4" onSubmit={handleCreateUser}>
                   <div className="grid gap-4 md:grid-cols-2">
@@ -1373,129 +1475,244 @@ export default function SuperAdminDashboard() {
             )}
 
             {activeTab === "groups" && (
-              <section className="bg-white rounded-3xl border border-slate-200 p-8 shadow-sm">
-                <div className="flex items-center justify-between mb-6">
-                  <div>
+              <>
+                <section className="bg-white rounded-3xl border border-slate-200 p-8 shadow-sm">
+                  <div className="mb-6">
                     <h2 className="text-2xl font-semibold text-slate-900">
-                      أنشئ مجموعة
+                      متابعة مشاهدات الطلاب لدروس الأسبوع
                     </h2>
-                    <p className="text-sm text-slate-500">
-                      قم بتعيين معلم وحدد الطلاب للمجموعة الجديدة.
+                    <p className="mt-2 text-sm text-slate-500">
+                      متابعة نسبة مشاهدة كل طالب للدرس الحالي مع آخر موعد تم فيه
+                      المشاهدة.
                     </p>
                   </div>
-                </div>
-                <form className="space-y-4" onSubmit={handleCreateGroup}>
-                  <label className="space-y-2 text-sm text-slate-700">
-                    اسم المجموعة
-                    <input
-                      value={groupName}
-                      onChange={(e) => setGroupName(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-300 px-4 py-3"
-                      placeholder="مثال: مجموعة القرآن الصباحية"
-                    />
-                  </label>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <label className="space-y-2 text-sm text-slate-700">
-                      معلم
-                      <select
-                        value={selectedGroupTeacher}
-                        onChange={(e) =>
-                          setSelectedGroupTeacher(e.target.value)
-                        }
-                        className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3"
-                      >
-                        {teachers.length === 0 ? (
-                          <option value="">لا يوجد معلم متاح</option>
-                        ) : (
-                          teachers.map((teacher) => (
-                            <option key={teacher._id} value={teacher._id}>
-                              {`${teacher.firstName} ${teacher.lastName}`}
-                            </option>
-                          ))
-                        )}
-                      </select>
-                    </label>
-                    <div className="space-y-2 text-sm text-slate-700">
-                      <span>الطلاب</span>
-                      <input
-                        type="text"
-                        value={studentSearchQuery}
-                        onChange={(e) => setStudentSearchQuery(e.target.value)}
-                        placeholder="ابحث عن اسم الطالب..."
-                        className="w-full mb-3 rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm shadow-sm transition duration-150 focus:outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
-                      />
 
-                      <div className="mb-3 flex flex-wrap gap-2">
-                        {selectedGroupStudents
-                          .map((id) => students.find((s) => s._id === id))
-                          .filter(Boolean)
-                          .map((student) => (
-                            <span
-                              key={student._id}
-                              className="inline-flex items-center gap-2 rounded-full bg-quran-50 border border-quran-200 px-3 py-1 text-sm text-quran-800"
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-slate-200 text-sm">
+                      <thead className="bg-slate-50">
+                        <tr>
+                          <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                            اسم الحلقة
+                          </th>
+                          <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                            اسم الطالب
+                          </th>
+                          <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                            الدرس الحالي
+                          </th>
+                          <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                            نسبة المشاهدة
+                          </th>
+                          <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                            الحالة
+                          </th>
+                          <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                            آخر مشاهدة
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200">
+                        {lessonWatchTracker.length === 0 ? (
+                          <tr>
+                            <td
+                              colSpan="6"
+                              className="px-4 py-8 text-center text-slate-500"
                             >
-                              {student.firstName} {student.lastName}
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  removeSelectedGroupStudent(student._id)
-                                }
-                                className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-quran-600 text-white text-xs"
-                              >
-                                ×
-                              </button>
-                            </span>
-                          ))}
-                      </div>
-
-                      <div className="grid gap-2 rounded-2xl border border-slate-300 bg-slate-50 p-4 max-h-72 overflow-y-auto">
-                        {selectedGroupTeacher === "" ? (
-                          <p className="text-sm text-slate-500">
-                            اختر معلمًا أولاً لرؤية الطلاب
-                          </p>
-                        ) : filteredGroupStudentsBySearch.length === 0 ? (
-                          <p className="text-sm text-slate-500">
-                            لا يوجد طلاب مرتبطين بهذا المعلم
-                          </p>
+                              لا توجد بيانات متابعة حتى الآن.
+                            </td>
+                          </tr>
                         ) : (
-                          filteredGroupStudentsBySearch.map((student) => {
-                            const selected = selectedGroupStudents.includes(
-                              student._id,
-                            );
-                            const labelClass = `inline-flex items-center gap-3 rounded-2xl px-4 py-3 text-sm ${selected ? "border-quran-500 bg-quran-50" : "border-slate-200 bg-white"}`;
+                          lessonWatchTracker.map((entry) => {
+                            const barColor =
+                              entry.watchPercentage >= 75
+                                ? "bg-emerald-500"
+                                : entry.watchPercentage > 0
+                                  ? "bg-amber-400"
+                                  : "bg-slate-300";
                             return (
-                              <label key={student._id} className={labelClass}>
-                                <input
-                                  type="checkbox"
-                                  checked={selected}
-                                  onChange={() =>
-                                    handleToggleGroupStudent(student._id)
-                                  }
-                                  className="h-4 w-4 rounded border-slate-300 text-quran-600"
-                                />
-                                <span>{`${student.firstName} ${student.lastName}`}</span>
-                              </label>
+                              <tr
+                                key={`${entry.groupId}-${entry.studentId}`}
+                                className="bg-white"
+                              >
+                                <td className="px-4 py-3 font-medium text-slate-800">
+                                  {entry.groupName}
+                                </td>
+                                <td className="px-4 py-3 font-medium text-slate-800">
+                                  {entry.studentName}
+                                </td>
+                                <td className="px-4 py-3 text-slate-700">
+                                  {entry.currentLessonTitle}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center gap-2">
+                                    <div className="h-2.5 w-28 overflow-hidden rounded-full bg-slate-200">
+                                      <div
+                                        className={`h-full rounded-full ${barColor}`}
+                                        style={{
+                                          width: `${Math.min(100, entry.watchPercentage || 0)}%`,
+                                        }}
+                                      />
+                                    </div>
+                                    <span className="text-xs font-bold text-slate-700">
+                                      {Math.round(entry.watchPercentage || 0)}%
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <span
+                                    className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-bold ${
+                                      entry.watchPercentage >= 75
+                                        ? "border-emerald-200 bg-emerald-100 text-emerald-800"
+                                        : entry.watchPercentage > 0
+                                          ? "border-amber-200 bg-amber-100 text-amber-800"
+                                          : "border-slate-200 bg-slate-100 text-slate-700"
+                                    }`}
+                                  >
+                                    {entry.status}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 text-slate-600">
+                                  {entry.lastWatchedAt
+                                    ? new Date(
+                                        entry.lastWatchedAt,
+                                      ).toLocaleString("ar-EG")
+                                    : "—"}
+                                </td>
+                              </tr>
                             );
                           })
                         )}
-                      </div>
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+
+                <section className="bg-white rounded-3xl border border-slate-200 p-8 shadow-sm">
+                  <div className="flex items-center justify-between mb-6">
+                    <div>
+                      <h2 className="text-2xl font-semibold text-slate-900">
+                        أنشئ مجموعة
+                      </h2>
+                      <p className="text-sm text-slate-500">
+                        قم بتعيين معلم وحدد الطلاب للمجموعة الجديدة.
+                      </p>
                     </div>
                   </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <button
-                      type="submit"
-                      className="inline-flex items-center justify-center rounded-2xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-slate-700"
-                    >
-                      أنشئ مجموعة
-                    </button>
-                    {groupStatus && (
-                      <span className="text-sm text-slate-700">
-                        {groupStatus}
-                      </span>
-                    )}
-                  </div>
-                </form>
-              </section>
+                  <form className="space-y-4" onSubmit={handleCreateGroup}>
+                    <label className="space-y-2 text-sm text-slate-700">
+                      اسم المجموعة
+                      <input
+                        value={groupName}
+                        onChange={(e) => setGroupName(e.target.value)}
+                        className="w-full rounded-2xl border border-slate-300 px-4 py-3"
+                        placeholder="مثال: مجموعة القرآن الصباحية"
+                      />
+                    </label>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="space-y-2 text-sm text-slate-700">
+                        معلم
+                        <select
+                          value={selectedGroupTeacher}
+                          onChange={(e) =>
+                            setSelectedGroupTeacher(e.target.value)
+                          }
+                          className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3"
+                        >
+                          {teachers.length === 0 ? (
+                            <option value="">لا يوجد معلم متاح</option>
+                          ) : (
+                            teachers.map((teacher) => (
+                              <option key={teacher._id} value={teacher._id}>
+                                {`${teacher.firstName} ${teacher.lastName}`}
+                              </option>
+                            ))
+                          )}
+                        </select>
+                      </label>
+                      <div className="space-y-2 text-sm text-slate-700">
+                        <span>الطلاب</span>
+                        <input
+                          type="text"
+                          value={studentSearchQuery}
+                          onChange={(e) =>
+                            setStudentSearchQuery(e.target.value)
+                          }
+                          placeholder="ابحث عن اسم الطالب..."
+                          className="w-full mb-3 rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm shadow-sm transition duration-150 focus:outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
+                        />
+
+                        <div className="mb-3 flex flex-wrap gap-2">
+                          {selectedGroupStudents
+                            .map((id) => students.find((s) => s._id === id))
+                            .filter(Boolean)
+                            .map((student) => (
+                              <span
+                                key={student._id}
+                                className="inline-flex items-center gap-2 rounded-full bg-quran-50 border border-quran-200 px-3 py-1 text-sm text-quran-800"
+                              >
+                                {student.firstName} {student.lastName}
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    removeSelectedGroupStudent(student._id)
+                                  }
+                                  className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-quran-600 text-white text-xs"
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            ))}
+                        </div>
+
+                        <div className="grid gap-2 rounded-2xl border border-slate-300 bg-slate-50 p-4 max-h-72 overflow-y-auto">
+                          {selectedGroupTeacher === "" ? (
+                            <p className="text-sm text-slate-500">
+                              اختر معلمًا أولاً لرؤية الطلاب
+                            </p>
+                          ) : filteredGroupStudentsBySearch.length === 0 ? (
+                            <p className="text-sm text-slate-500">
+                              لا يوجد طلاب مرتبطين بهذا المعلم
+                            </p>
+                          ) : (
+                            filteredGroupStudentsBySearch.map((student) => {
+                              const selected = selectedGroupStudents.includes(
+                                student._id,
+                              );
+                              const labelClass = `inline-flex items-center gap-3 rounded-2xl px-4 py-3 text-sm ${selected ? "border-quran-500 bg-quran-50" : "border-slate-200 bg-white"}`;
+                              return (
+                                <label key={student._id} className={labelClass}>
+                                  <input
+                                    type="checkbox"
+                                    checked={selected}
+                                    onChange={() =>
+                                      handleToggleGroupStudent(student._id)
+                                    }
+                                    className="h-4 w-4 rounded border-slate-300 text-quran-600"
+                                  />
+                                  <span>{`${student.firstName} ${student.lastName}`}</span>
+                                </label>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between gap-4">
+                      <button
+                        type="submit"
+                        className="inline-flex items-center justify-center rounded-2xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-slate-700"
+                      >
+                        أنشئ مجموعة
+                      </button>
+                      {groupStatus && (
+                        <span className="text-sm text-slate-700">
+                          {groupStatus}
+                        </span>
+                      )}
+                    </div>
+                  </form>
+                </section>
+              </>
             )}
 
             {/* ========== Teacher Management Section ========== */}
@@ -2415,6 +2632,39 @@ export default function SuperAdminDashboard() {
                         />
                       </label>
                     </div>
+                  </div>
+
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-800 mb-3">
+                      أسئلة الفيديوهات
+                    </h3>
+                    <div className="grid gap-4 md:grid-cols-1 max-w-xs">
+                      <label className="space-y-2 text-sm text-slate-700">
+                        نقاط كل سؤال من أسئلة الفيديوهات
+                        <input
+                          type="number"
+                          min="0"
+                          value={settings.videoQuestionPoints}
+                          onChange={(e) =>
+                            handleSettingsChange(
+                              "videoQuestionPoints",
+                              e.target.value,
+                            )
+                          }
+                          className="w-full rounded-2xl border border-slate-300 px-4 py-3"
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="rounded-3xl bg-slate-50 p-4 text-sm text-slate-700">
+                    <p className="font-semibold text-slate-900 mb-2">
+                      معاينة نقطة أسئلة الفيديوهات
+                    </p>
+                    <p>
+                      • كل إجابة صحيحة في أسئلة الفيديوهات: +
+                      {settings.videoQuestionPoints} نقاط (بحد أقصى 10 أسئلة)
+                    </p>
                   </div>
 
                   <div>
